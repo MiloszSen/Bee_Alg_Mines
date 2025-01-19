@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <title>Bee Algorithm - Kopalnia</title>
+
+  
+  <link 
+    rel="stylesheet"
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css"
+  />
+
+  
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+
+  <style>
+    body {
+      background-color: #f5f5f5;
+    }
+    #graphArea {
+      width: 100%;
+      height: 600px;
+      border: 1px solid #ccc;
+      margin-top: 1rem;
+      position: relative;
+    }
+    .node circle {
+      fill: #3498db;
+      stroke: #fff;
+      stroke-width: 2px;
+      cursor: default;
+    }
+    .link {
+      stroke: #999;
+      stroke-opacity: 0.6;
+      stroke-width: 2px;
+    }
+    .truck {
+      stroke: #222;
+      stroke-width: 1px;
+    }
+  </style>
+</head>
+
+<body class="bg-light">
+<div class="container py-4">
+  <h1>Bee Algorithm - Kopalnia</h1>
+  
+  
+  <form class="row g-3" id="algoForm" method="POST" enctype="multipart/form-data">
+    
+    <div class="col-md-4">
+      <label for="excelFile" class="form-label">Plik Excel</label>
+      <input 
+        type="file" 
+        class="form-control" 
+        id="excelFile" 
+        name="excelFile" 
+        accept=".xlsx, .xls"
+      />
+    </div>
+    <div class="col-md-2">
+      <label for="numTrucks" class="form-label">Liczba ciężarówek</label>
+      <input 
+        type="number" 
+        class="form-control" 
+        id="numTrucks" 
+        name="numTrucks" 
+        value="1"
+      >
+    </div>
+    <div class="col-md-2">
+      <label for="truckCapacity" class="form-label">Pojemność ciężarówki</label>
+      <input 
+        type="number" 
+        class="form-control" 
+        id="truckCapacity" 
+        name="truckCapacity" 
+        value="30"
+      >
+    </div>
+    <div class="col-md-2">
+      <label for="maxDays" class="form-label">Maks. liczba dni</label>
+      <input 
+        type="number" 
+        class="form-control" 
+        id="maxDays" 
+        name="maxDays" 
+        value="5"
+      >
+    </div>
+    <div class="col-md-2">
+      <label for="popSize" class="form-label">Rozmiar populacji</label>
+      <input 
+        type="number" 
+        class="form-control" 
+        id="popSize" 
+        name="popSize" 
+        value="10"
+      >
+    </div>
+    <div class="col-md-2">
+      <label for="maxIter" class="form-label">Maks. iteracji</label>
+      <input 
+        type="number" 
+        class="form-control" 
+        id="maxIter" 
+        name="maxIter" 
+        value="10"
+      >
+    </div>
+    <div class="col-md-2">
+      <label for="maxCO2" class="form-label">Limit CO2</label>
+      <input 
+        type="number" 
+        class="form-control" 
+        id="maxCO2" 
+        name="maxCO2" 
+        value="500"
+      >
+    </div>
+
+    <div class="col-12">
+      <button type="submit" class="btn btn-primary">
+        Uruchom Algorytm
+      </button>
+    </div>
+  </form>
+
+  <div class="mt-4">
+    <h3>Wynik:</h3>
+    <p id="profitLabel"></p>
+    <p id="timeLabel"></p>
+  </div>
+
+  
+  <table class="table table-sm table-bordered" id="routesTable" style="display: none;">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Skąd</th>
+        <th>Dokąd</th>
+        <th>Surowiec</th>
+        <th>Ilość (ton)</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  
+  <div id="graphArea"></div>
+</div>
+
+
+<script 
+  src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js">
+</script>
+
+<script>
+
+document.getElementById("algoForm").addEventListener("submit", function(e) {
+  e.preventDefault();
+  runAlgorithm();
+});
+
+
+function runAlgorithm() {
+  const form = document.getElementById("algoForm");
+  const formData = new FormData(form);
+
+  fetch("/run-algorithm", {
+    method: "POST",
+    body: formData
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.error) {
+      alert(data.error);
+      return;
+    }
+
+    
+    document.getElementById("profitLabel").innerText =
+      "Najlepszy osiągnięty zysk: " + data.bestProfit.toFixed(2);
+    document.getElementById("timeLabel").innerText =
+      "Czas wykonania całego algorytmu: " + data.algTime.toFixed(3) + " s";
+
+    
+    showRouteTable(data.routeEdges);
+
+    
+    drawGraphAndAnimate(data.allRoutes, data.routeEdgesAnim, data.numTrucks);
+  })
+  .catch(err => console.error(err));
+}
+
+
+function showRouteTable(routeEdges) {
+  const table = document.getElementById("routesTable");
+  table.style.display = "table";
+
+  const tbody = table.querySelector("tbody");
+  tbody.innerHTML = "";
+
+  routeEdges.forEach((edge, i) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${i+1}</td>
+      <td>${edge.from}</td>
+      <td>${edge.to}</td>
+      <td>${edge.resource || "?"}</td>
+      <td>${edge.amount}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+
+function drawGraphAndAnimate(allRoutes, routeEdgesAnim, numTrucks) {
+  
+  d3.select("#graphArea").selectAll("*").remove();
+
+  
+  const nodesSet = new Set();
+  allRoutes.forEach(e => {
+    nodesSet.add(e.from);
+    nodesSet.add(e.to);
+  });
+  const nodes = Array.from(nodesSet).map(id => ({ id }));
+
+  
+  const links = allRoutes.map(e => ({
+    source: e.from,
+    target: e.to,
+    distance: e.distance
+  }));
+
+  
+  const width = document.getElementById("graphArea").clientWidth;
+  const height = document.getElementById("graphArea").clientHeight;
+
+  
+  const svg = d3.select("#graphArea")
+                .append("svg")
+                .attr("width", width)
+                .attr("height", height);
+
+  
+  const simulation = d3.forceSimulation(nodes)
+    .force("link", d3.forceLink(links).id(d => d.id).distance(200))
+    .force("charge", d3.forceManyBody().strength(-300))
+    .force("center", d3.forceCenter(width/2 , height/2 ));
+
+  
+  const link = svg.selectAll(".link")
+    .data(links)
+    .enter()
+    .append("line")
+    .attr("class", "link");
+
+  
+  const node = svg.selectAll(".node")
+    .data(nodes)
+    .enter()
+    .append("g")
+    .attr("class", "node");
+
+  node.append("circle").attr("r", 15);
+
+  node.append("text")
+    .attr("dy", 5)
+    .attr("text-anchor", "middle")
+    .text(d => d.id)
+    .attr("font-size", "12px")
+    .attr("fill", "#fff");
+
+  simulation.on("tick", () => {
+    link
+      .attr("x1", d => d.source.x)
+      .attr("y1", d => d.source.y)
+      .attr("x2", d => d.target.x)
+      .attr("y2", d => d.target.y);
+
+    node
+      .attr("transform", d => `translate(${d.x}, ${d.y})`);
+  });
+
+  
+  simulation.on("end", () => {
+    simulation.stop();
+
+    
+    const nodePositions = {};
+    nodes.forEach(n => {
+      nodePositions[n.id] = { x: n.x, y: n.y };
+    });
+
+    
+    animateTrucks(svg, nodePositions, routeEdgesAnim, numTrucks);
+  });
+}
+
+
+function animateTrucks(svg, nodePositions, routeEdgesAnim, numTrucks) {
+  
+  const trucksData = [];
+  for (let i = 0; i < numTrucks; i++) {
+    trucksData.push([]);
+  }
+  routeEdgesAnim.forEach(edge => {
+    const id = edge.truckId !== undefined ? edge.truckId : 0;
+    trucksData[id].push(edge);
+  });
+
+  
+  const truckColors = ["orange", "green", "purple", "red", "blue", "pink", "gray", "brown"];
+
+  
+  const INITIAL_DELAY_PER_TRUCK = 600;
+
+  
+
+  
+  const trucks = trucksData.map((edgesForTruck, i) => {
+    const color = truckColors[i % truckColors.length];
+    let startX = 0;
+    let startY = 0;
+
+    if (edgesForTruck.length > 0) {
+      const firstFrom = edgesForTruck[0].from;
+      startX = nodePositions[firstFrom].x;
+      startY = nodePositions[firstFrom].y;
+    }
+
+    
+    const circle = svg.append("circle")
+      .attr("class", "truck")
+      .attr("r", 8)
+      .attr("cx", startX)
+      .attr("cy", startY)
+      .style("fill", color);
+
+    return { circle };
+  });
+
+  
+  function animateTruck(truckIndex, edgeIndex) {
+    const truckRoutes = trucksData[truckIndex];
+    if (edgeIndex >= truckRoutes.length) {
+      return;
+    }
+
+    const edge = truckRoutes[edgeIndex];
+    const { circle } = trucks[truckIndex];
+
+    const fromPos = nodePositions[edge.from];
+    const toPos = nodePositions[edge.to];
+
+    
+    const delayTime = (edgeIndex === 0) 
+      ? truckIndex * INITIAL_DELAY_PER_TRUCK 
+      : 0;
+
+    circle
+      .transition()
+      .delay(delayTime)
+      .duration(600)       
+      .attr("cx", toPos.x)
+      .attr("cy", toPos.y)
+      .on("end", () => {
+        
+        animateTruck(truckIndex, edgeIndex + 1);
+      });
+  }
+
+  
+  for (let i = 0; i < numTrucks; i++) {
+    animateTruck(i, 0);
+  }
+}
+</script>
+</body>
+</html>
